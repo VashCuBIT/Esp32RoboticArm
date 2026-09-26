@@ -49,6 +49,64 @@ class MusicDanceController {
     }
 
     this.audioElement.addEventListener("ended", () => this.stop());
+
+    this.cadenceSelect = document.getElementById("music-cadence-select");
+    this.cadenceBadge = document.getElementById("music-cadence-badge");
+    this.intensitySlider = document.getElementById("music-intensity-slider");
+    this.intensityVal = document.getElementById("music-intensity-val");
+
+    // Restaurar preferências salvas no navegador
+    const savedCadence = localStorage.getItem("arm_dance_cadence") || "half_time";
+    const savedIntensity = localStorage.getItem("arm_dance_intensity") || "75";
+    if (this.cadenceSelect) this.cadenceSelect.value = savedCadence;
+    if (this.intensitySlider) this.intensitySlider.value = savedIntensity;
+    if (this.intensityVal) this.intensityVal.textContent = `${savedIntensity}%`;
+    this.updateCadenceBadge(savedCadence);
+
+    if (this.cadenceSelect) {
+      this.cadenceSelect.addEventListener("change", (e) => {
+        const mode = e.target.value;
+        localStorage.setItem("arm_dance_cadence", mode);
+        this.updateCadenceBadge(mode);
+        this.syncAttenuation();
+      });
+    }
+
+    if (this.intensitySlider) {
+      this.intensitySlider.addEventListener("input", (e) => {
+        const val = e.target.value;
+        if (this.intensityVal) this.intensityVal.textContent = `${val}%`;
+        localStorage.setItem("arm_dance_intensity", val);
+      });
+      this.intensitySlider.addEventListener("change", () => {
+        this.syncAttenuation();
+      });
+    }
+  }
+
+  updateCadenceBadge(mode) {
+    if (!this.cadenceBadge) return;
+    const labels = {
+      half_time: "1 Sim, 1 Não",
+      auto: "Automático",
+      quarter_time: "1 a cada 4",
+      all_beats: "Todas (1:1)"
+    };
+    this.cadenceBadge.textContent = labels[mode] || mode;
+  }
+
+  async syncAttenuation() {
+    const mode = this.cadenceSelect ? this.cadenceSelect.value : "half_time";
+    const intensity = this.intensitySlider ? parseInt(this.intensitySlider.value, 10) / 100.0 : 0.75;
+    try {
+      await fetch("/api/music/attenuation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, intensity })
+      });
+    } catch (e) {
+      console.warn("Erro ao sincronizar atenuação com o servidor:", e);
+    }
   }
 
   initAudioVisualizer() {
@@ -116,8 +174,9 @@ class MusicDanceController {
         this.currentTrack = data;
         this.trackTitle.textContent = data.title;
         this.audioElement.src = data.mp3_url;
-        this.setStatus(`Pronto! ${data.beats_count} batidas detectadas.`);
-        if (window.showToast) window.showToast("Música carregada e analisada com sucesso!");
+        const bpmInfo = data.bpm ? ` (~${Math.round(data.bpm)} BPM)` : "";
+        this.setStatus(`Pronto! ${data.beats_count} batidas${bpmInfo} detectadas.`);
+        if (window.showToast) window.showToast(`Música carregada e analisada!${bpmInfo}`);
       } else {
         this.setStatus(`Erro: ${data.error}`);
       }
@@ -144,8 +203,9 @@ class MusicDanceController {
         this.currentTrack = data;
         this.trackTitle.textContent = data.title;
         this.audioElement.src = data.mp3_url;
-        this.setStatus(`Pronto! ${data.beats_count} batidas detectadas.`);
-        if (window.showToast) window.showToast("Música do YouTube pronta!");
+        const bpmInfo = data.bpm ? ` (~${Math.round(data.bpm)} BPM)` : "";
+        this.setStatus(`Pronto! ${data.beats_count} batidas${bpmInfo} detectadas.`);
+        if (window.showToast) window.showToast(`Música do YouTube pronta!${bpmInfo}`);
       } else {
         this.setStatus(`Erro: ${data.error}`);
       }
@@ -181,10 +241,17 @@ class MusicDanceController {
       this.btnPlay.textContent = "Pausar";
       this.setStatus("Dançando no ritmo da música...");
 
+      const mode = this.cadenceSelect ? this.cadenceSelect.value : "half_time";
+      const intensity = this.intensitySlider ? parseInt(this.intensitySlider.value, 10) / 100.0 : 0.75;
+
       await fetch("/api/music/play", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: this.currentTrack.mp3_filename })
+        body: JSON.stringify({
+          filename: this.currentTrack.mp3_filename,
+          attenuation_mode: mode,
+          intensity: intensity
+        })
       });
     } catch (e) {
       console.error("Erro ao reproduzir:", e);

@@ -212,15 +212,38 @@ async def process_youtube(req: YouTubeRequest):
 
 class PlayMusicRequest(BaseModel):
     filename: str
+    attenuation_mode: str = "half_time"
+    intensity: float = 0.75
 
 @app.post("/api/music/play")
 async def play_music(req: PlayMusicRequest, background_tasks: BackgroundTasks):
     global dance_running, dance_start_time
+    music_service.set_attenuation(req.attenuation_mode, req.intensity)
     music_service.is_playing = True
     dance_running = True
     dance_start_time = time.time()
     background_tasks.add_task(run_dance_loop)
-    return {"success": True, "status": "playing", "duration": music_service.current_song_duration}
+    return {
+        "success": True,
+        "status": "playing",
+        "duration": music_service.current_song_duration,
+        "bpm": music_service.detected_bpm,
+        "attenuation_mode": music_service.attenuation_mode,
+        "intensity": music_service.intensity
+    }
+
+class AttenuationRequest(BaseModel):
+    mode: str = "half_time"
+    intensity: float = 0.75
+
+@app.post("/api/music/attenuation")
+async def set_music_attenuation(req: AttenuationRequest):
+    music_service.set_attenuation(req.mode, req.intensity)
+    return {
+        "success": True,
+        "attenuation_mode": music_service.attenuation_mode,
+        "intensity": music_service.intensity
+    }
 
 @app.post("/api/music/stop")
 async def stop_music():
@@ -242,9 +265,9 @@ async def run_dance_loop():
             break
 
         pose = music_service.get_pose_at_time(current_sec)
-        await esp32_client.send_move(pose, speed=pose.get("speed", 85))
+        await esp32_client.send_move(pose, speed=pose.get("speed", 65))
         await broadcast_telemetry()
-        await asyncio.sleep(0.04) # ~25 fps dance update rate
+        await asyncio.sleep(0.045) # ~22 fps smooth rate
 
 # ==================== IA TALK APIS ====================
 

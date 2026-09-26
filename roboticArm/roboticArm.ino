@@ -1,4 +1,5 @@
-﻿#include <WiFi.h>
+#include <WiFi.h>
+#include <esp_wifi.h>
 #include <WebServer.h>
 #include <ESP32Servo.h>
 #include <driver/i2s.h>
@@ -7,27 +8,29 @@
 
 /*
   ==============================================================================
-  BRAÃ‡O ROBÃ“TICO ESP32 - FIRMWARE V8.1 FAST MOTION
+  BRAÇO ROBÓTICO ESP32 - FIRMWARE V8.1 FAST MOTION & ULTRA STABLE WI-FI
   ==============================================================================
-  - Arquitetura de 7 Servos Motores com Conversor de NÃ­vel LÃ³gico SN74HCT245N
-  - Servos MG90S com dinÃ¢mica rÃ¡pida acelerada (fator de velocidade 2.0x)
+  - Arquitetura de 7 Servos Motores com Conversor de Nível Lógico SN74HCT245N
+  - Servos MG90S com dinâmica rápida acelerada (fator de velocidade 2.0x)
   - Servos MG996R com controle suave e alto torque (fatores 1.25x - 1.35x)
-  - Acumulador fracionÃ¡rio de graus com integraÃ§Ã£o temporal de alta precisÃ£o (4ms)
-  - Ãudio I2S: 2x Microfones INMP441 (Entrada EstÃ©reo) + DAC MAX98357A (SaÃ­da)
+  - Acumulador fracionário de graus com integração temporal de alta precisão (4ms)
+  - Áudio I2S: 2x Microfones INMP441 (Entrada Estéreo) + DAC MAX98357A (Saída)
   - API REST HTTP completa, suporte a JSON bruto e Telemetria em tempo real
-  - PersistÃªncia nÃ£o-volÃ¡til em Flash NVS (Preferences) de Home, Pinos e Limites
+  - Persistência não-volátil em Flash NVS (Preferences) de Home, Pinos e Limites
+  - Wi-Fi Ultra-Estável: Modem Sleep desativado, controle fino de TX Power (17dBm),
+    gerenciamento inteligente anti-conflito de canais e fallback automático de AP.
   ==============================================================================
 
-  Mapeamento PadrÃ£o de Pinos (Conforme Descritivo TÃ©cnico - Esquema v8):
+  Mapeamento Padrão de Pinos (Conforme Descritivo Técnico - Esquema v8):
   ------------------------------------------------------------------------------
   Servos MG90S (Buffer SN74HCT245N - 3.3V -> 5V):
     - D13 -> Garra Abertura  (HCT245 A1-IN > B1-OUT, pinos 2 e 18)
-    - D14 -> Garra RotaÃ§Ã£o   (HCT245 A2-IN > B2-OUT, pinos 3 e 17)
+    - D14 -> Garra Rotação   (HCT245 A2-IN > B2-OUT, pinos 3 e 17)
     - D18 -> Ombro Slave     (HCT245 A6-IN > B6-OUT, pinos 7 e 13)
     - D19 -> Punho           (HCT245 A7-IN > B7-OUT, pinos 8 e 12)
 
   Servos MG996R (Buffer SN74HCT245N - 3.3V -> 5V):
-    - D25 -> Base RotaÃ§Ã£o    (HCT245 A5-IN > B5-OUT, pinos 6 e 14)
+    - D25 -> Base Rotação    (HCT245 A5-IN > B5-OUT, pinos 6 e 14)
     - D26 -> Cotovelo        (HCT245 A4-IN > B4-OUT, pinos 5 e 15)
     - D27 -> Ombro Master    (HCT245 A3-IN > B3-OUT, pinos 4 e 16)
 
@@ -36,7 +39,7 @@
     - SCK -> GPIO 32
     - SD  -> GPIO 35 (Entrada direta)
 
-  Amplificador MAX98357A (I2S Canal 1 - SaÃ­da):
+  Amplificador MAX98357A (I2S Canal 1 - Saída):
     - LRC  -> GPIO 21
     - BCLK -> GPIO 22
     - DIN  -> GPIO 23
@@ -44,28 +47,33 @@
 */
 
 // ==============================================================================
-// 1. CONFIGURAÃ‡Ã•ES DE REDE WI-FI & SERVIDOR WEB
+// 1. CONFIGURAÇÕES DE REDE WI-FI & SERVIDOR WEB
 // ==============================================================================
 
-// Modo Station (ConexÃ£o a um roteador ou hotspot do celular/notebook)
+// Modo Station (Conexão a um roteador ou hotspot do celular/notebook)
 const char* STA_SSID     = "EsseAKI";
 const char* STA_PASSWORD = "trapboost";
 const bool  USAR_IP_ESTATICO_STA = false;
 
-// DefiniÃ§Ãµes de IP EstÃ¡tico (utilizadas se USAR_IP_ESTATICO_STA = true)
+// Se true: Desativa o AP próprio quando conectado ao Hotspot para dedicar 100%
+// do rádio e antena à conexão principal, eliminando saltos de canal de rádio
+// e desconexões periódicas a cada poucos segundos. Caso o Hotspot caia, o AP reativa.
+const bool PRIORIZAR_ESTABILIDADE_STA = true;
+
+// Definições de IP Estático (utilizadas se USAR_IP_ESTATICO_STA = true)
 IPAddress ESP32_IP_FIXO(192, 168, 1, 150);
 IPAddress ESP32_GATEWAY(192, 168, 1, 1);
 IPAddress ESP32_SUBNET(255, 255, 255, 0);
 IPAddress ESP32_DNS(8, 8, 8, 8);
 
-// Modo Access Point (Rede direta prÃ³pria criada pelo ESP32)
+// Modo Access Point (Rede direta de contingência criada pelo ESP32)
 const char* AP_SSID     = "BRACO_ESP32_AP";
 const char* AP_PASSWORD = "12345678";
 IPAddress AP_IP(192, 168, 4, 1);
 IPAddress AP_GATEWAY(192, 168, 4, 1);
 IPAddress AP_SUBNET(255, 255, 255, 0);
 
-// Servidor HTTP REST na porta padrÃ£o 80
+// Servidor HTTP REST na porta padrão 80
 WebServer server(80);
 
 // ==============================================================================
@@ -1003,70 +1011,147 @@ void configurarRotas() {
 }
 
 // ==============================================================================
-// 11. INICIALIZAÃ‡ÃƒO DO SISTEMA (SETUP)
+// 11. INICIALIZACAO DO SISTEMA (SETUP)
 // ==============================================================================
+
+unsigned long ultimoStatusSerialMs = 0;
+unsigned long ultimoMomentoConectadoMs = 0;
+unsigned long ultimaTentativaReconexaoMs = 0;
+bool apAtivo = false;
+wl_status_t ultimoStatusWifi = WL_IDLE_STATUS;
+
+const char* obterNomeMotivoDesconexao(uint8_t motivo) {
+  switch (motivo) {
+    case 1:   return "UNSPECIFIED (Nao especificado)";
+    case 2:   return "AUTH_EXPIRE (Autenticacao expirou)";
+    case 3:   return "AUTH_LEAVE (Desconectado/Deauthed)";
+    case 4:   return "ASSOC_EXPIRE (Associacao expirou)";
+    case 8:   return "ASSOC_LEAVE (Desconectado pelo roteador/celular)";
+    case 15:  return "4WAY_HANDSHAKE_TIMEOUT (Timeout de chave WPA2 - desative WPA3/PMF no celular)";
+    case 200: return "BEACON_TIMEOUT (Perda de sinal / Beacons perdidos por Modem Sleep)";
+    case 201: return "NO_AP_FOUND (Rede nao encontrada - verifique se Hotspot esta em 2.4 GHz)";
+    case 202: return "AUTH_FAIL (Senha Wi-Fi incorreta)";
+    case 203: return "ASSOC_FAIL (Falha de associacao com a rede)";
+    case 204: return "HANDSHAKE_TIMEOUT (Timeout de aperto de mao WPA)";
+    default:  return "OUTRO_MOTIVO";
+  }
+}
+
+void imprimirStatusRede() {
+  Serial.println("\n------------------------------------------------------------");
+  Serial.println("  >>> DIAGNOSTICO DE REDE - BRACO ROBOTICO ESP32 <<<");
+  Serial.println("------------------------------------------------------------");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("  [Wi-Fi STA] STATUS: CONECTADO COM SUCESSO!");
+    Serial.printf ("  [Wi-Fi STA] Rede / Hotspot: %s\n", STA_SSID);
+    Serial.printf ("  [Wi-Fi STA] IP ATRIBUIDO:   %s  <--- USE ESTE IP NA INTERFACE\n", WiFi.localIP().toString().c_str());
+    Serial.printf ("  [Wi-Fi STA] Gateway:        %s\n", WiFi.gatewayIP().toString().c_str());
+    Serial.printf ("  [Wi-Fi STA] Sinal (RSSI):   %d dBm\n", WiFi.RSSI());
+    Serial.printf ("  [Wi-Fi STA] Canal de Radio: %d\n", WiFi.channel());
+  } else {
+    Serial.println("  [Wi-Fi STA] STATUS: NAO CONECTADO AO HOTSPOT / ROTEADOR");
+    Serial.printf ("  [Wi-Fi STA] SSID Configurado: %s\n", STA_SSID);
+    Serial.printf ("  [Wi-Fi STA] Codigo de Status: %d\n", (int)WiFi.status());
+    Serial.println("  [DICA 1]: O Hotspot do seu celular DEVE estar na banda 2.4 GHz!");
+    Serial.println("  [DICA 2]: No iPhone, ative 'Maximizar Compatibilidade'.");
+    Serial.println("  [DICA 3]: No Android, configure a banda do Ponto de Acesso para 2.4 GHz.");
+  }
+  Serial.println("  ----------------------------------------------------------");
+  if (apAtivo) {
+    Serial.println("  [Wi-Fi AP]  Ponto de Acesso de Contingencia (ATIVO):");
+    Serial.printf ("  [Wi-Fi AP]  Nome da Rede (SSID): %s\n", AP_SSID);
+    Serial.printf ("  [Wi-Fi AP]  Senha:               %s\n", AP_PASSWORD);
+    Serial.printf ("  [Wi-Fi AP]  IP do AP:            %s\n", WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.println("  [Wi-Fi AP]  Ponto de Acesso: EM ESPERA (Desativado para estabilidade do STA)");
+    Serial.println("              (Sera ativado automaticamente se o Hotspot cair por > 8s)");
+  }
+  Serial.println("  ----------------------------------------------------------");
+  Serial.println("  [mDNS]      Nome de Host: http://braco-esp32.local");
+  Serial.println("  (Dica: Pressione ENTER no Serial Monitor para ver este status a qualquer momento)");
+  Serial.println("------------------------------------------------------------\n");
+}
 
 void setup() {
   Serial.begin(115200);
   delay(500);
 
   Serial.println("\n============================================================");
-  Serial.println("  BRAÃ‡O ROBÃ“TICO ESP32 - FIRMWARE V8.1 FAST MOTION          ");
+  Serial.println("  BRACO ROBOTICO ESP32 - FIRMWARE V8.1 FAST MOTION & STABLE ");
   Serial.println("============================================================");
 
-  // 1. Carrega parÃ¢metros salvos na NVS Flash
+  // 1. Carrega parametros salvos na NVS Flash
   carregarConfiguracoesNVS();
 
-  // 2. Inicializa barramento de Ã¡udio I2S
+  // 2. Inicializa barramento de audio I2S
   configurarI2S();
 
-    // 3. Inicializa Wi-Fi no modo Dual ou Simples dependendo da conexao
+  // 3. Inicializacao Wi-Fi Ultra-Estavel (Sem Modem Sleep e sem Brownout)
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);                 // Desativa Modem Sleep (elimina quedas a cada 10-30s)
+  esp_wifi_set_ps(WIFI_PS_NONE);        // Forca 100% de atividade no nivel do driver ESP-IDF
+  WiFi.setTxPower(WIFI_POWER_17dBm);    // 17dBm estabiliza a tensao e evita picos de corrente
+
+  #ifdef ARDUINO_EVENT_WIFI_STA_DISCONNECTED
+  WiFi.onEvent([](WiFiEvent_t evento, WiFiEventInfo_t info) {
+    if (evento == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      uint8_t motivo = info.wifi_sta_disconnected.reason;
+      Serial.printf("\n[Wi-Fi Evento] Queda detectada! Codigo: %d -> %s\n", motivo, obterNomeMotivoDesconexao(motivo));
+    } else if (evento == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+      Serial.printf("\n[Wi-Fi Evento] >>> CONEXAO ESTABELECIDA! IP ATRIBUIDO: %s <<<\n", WiFi.localIP().toString().c_str());
+    }
+  });
+  #endif
+
+  // Inicia conexao Station (Hotspot / Roteador)
+  bool staConectou = false;
   if (strlen(STA_SSID) > 0 && strcmp(STA_SSID, "SUA_REDE_WIFI") != 0) {
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true);
-    delay(100);
-    
     if (USAR_IP_ESTATICO_STA) {
       WiFi.config(ESP32_IP_FIXO, ESP32_GATEWAY, ESP32_SUBNET, ESP32_DNS);
     }
+    WiFi.setAutoReconnect(true);
     WiFi.begin(STA_SSID, STA_PASSWORD);
-    Serial.print("[Wi-Fi STA] Conectando a ");
-    Serial.print(STA_SSID);
+    Serial.printf("[Wi-Fi STA] Conectando ao Hotspot '%s'...\n", STA_SSID);
 
     int tentativas = 0;
-    while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
-      delay(500);
+    while (WiFi.status() != WL_CONNECTED && tentativas < 25) {
+      delay(400);
       Serial.print(".");
       tentativas++;
     }
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\n[Wi-Fi STA] Conectado com sucesso!");
-      Serial.print("[Wi-Fi STA] IP: ");
-      Serial.println(WiFi.localIP());
-      WiFi.mode(WIFI_AP_STA);
-    } else {
-      Serial.println("\n[Wi-Fi STA] Falha. Desligando STA para evitar instabilidade na rede do ESP.");
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_AP);
-    }
-  } else {
-    WiFi.mode(WIFI_AP);
+    Serial.println();
+    staConectou = (WiFi.status() == WL_CONNECTED);
   }
 
-  // 4. Inicia o Access Point
-  WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
+  // Se conectou ao Hotspot com sucesso e priorizamos estabilidade,
+  // desligamos os beacons do AP local para evitar salto constante de canais.
+  if (staConectou) {
+    ultimoMomentoConectadoMs = millis();
+    if (PRIORIZAR_ESTABILIDADE_STA) {
+      WiFi.softAPdisconnect(true);
+      WiFi.mode(WIFI_STA);
+      apAtivo = false;
+      Serial.println("[Wi-Fi STA] Modo Puro Estacao ativo: 100% do radio dedicado ao Hotspot (Estabilidade maxima).");
+    } else {
+      WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
+      WiFi.softAP(AP_SSID, AP_PASSWORD, WiFi.channel());
+      apAtivo = true;
+    }
+  } else {
+    // Se nao conectou, sobe o AP de contingencia imediatamente
+    WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
+    WiFi.softAP(AP_SSID, AP_PASSWORD);
+    apAtivo = true;
+    Serial.println("[Wi-Fi AP] Hotspot nao encontrado de imediato. AP de contingencia ativado (192.168.4.1).");
+  }
 
-  Serial.print("\n[Wi-Fi AP] Rede direta ativa: ");
-  Serial.print(AP_SSID);
-  Serial.print(" | IP: ");
-  Serial.println(WiFi.softAPIP());
+  // 4. Imprime o relatorio completo de status e IPs
+  imprimirStatusRede();
 
-  // 5. Inicia o respondedor mDNS (permite acessar http://braco-esp32.local)
+  // 5. Inicia o respondedor mDNS
   if (MDNS.begin("braco-esp32")) {
     MDNS.addService("http", "tcp", 80);
-    Serial.println("[mDNS] DisponÃ­vel em: http://braco-esp32.local");
+    Serial.println("[mDNS] Disponivel em: http://braco-esp32.local");
   }
 
   // 6. Configura e inicializa o servidor HTTP REST
@@ -1074,12 +1159,9 @@ void setup() {
   server.begin();
   Serial.println("[HTTP] Servidor REST ativo na porta 80.");
 
-  // 7. InformaÃ§Ãµes de DinÃ¢mica de Movimento
-  Serial.println("[MOVIMENTO] Controle rÃ¡pido habilitado (v8.1 Fast Motion).");
-  Serial.printf("[MOVIMENTO] Velocidade padrÃ£o: %d graus/s\n", VELOCIDADE_PADRAO);
-  Serial.println("[MOVIMENTO] MG90S independentes (Garra/Punho): fator 2.0x");
-  Serial.println("[MOVIMENTO] Cotovelo e Base: fator 1.35x");
-  Serial.println("[MOVIMENTO] Ombro Master e Slave: fator 1.25x sincronizado");
+  // 7. Informacoes de Dinamica de Movimento
+  Serial.println("[MOVIMENTO] Controle rapido habilitado (v8.1 Fast Motion).");
+  Serial.printf("[MOVIMENTO] Velocidade padrao: %d graus/s\n", VELOCIDADE_PADRAO);
 }
 
 // ==============================================================================
@@ -1087,10 +1169,61 @@ void setup() {
 // ==============================================================================
 
 void loop() {
-  // Atende requisiÃ§Ãµes HTTP REST de forma nÃ£o-bloqueante
   server.handleClient();
-
-  // Executa ciclo de cinemÃ¡tica e cÃ¡lculo dos passos dos motores
   atualizarMovimentos();
+
+  unsigned long agora = millis();
+
+  // 1. Gerenciamento inteligente e resiliente da conexao Wi-Fi
+  if (WiFi.status() == WL_CONNECTED) {
+    ultimoMomentoConectadoMs = agora;
+
+    // Se o AP de contingencia ainda estiver ativo e priorizamos estabilidade, desliga para eliminar conflito de canais
+    if (apAtivo && PRIORIZAR_ESTABILIDADE_STA) {
+      WiFi.softAPdisconnect(true);
+      WiFi.mode(WIFI_STA);
+      apAtivo = false;
+      Serial.println("[Wi-Fi AP] AP de contingencia em espera (100% da banda e radio dedicados ao Hotspot).");
+    }
+  } else {
+    // Se ficar desconectado por mais de 8 segundos, sobe o AP de contingencia para o usuario nao ficar sem acesso
+    if (!apAtivo && (agora - ultimoMomentoConectadoMs > 8000)) {
+      WiFi.mode(WIFI_AP_STA);
+      WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
+      WiFi.softAP(AP_SSID, AP_PASSWORD);
+      apAtivo = true;
+      Serial.println("[Wi-Fi AP] Hotspot desconectado: Ativando AP de Contingencia 'BRACO_ESP32_AP' (192.168.4.1)...");
+    }
+
+    // Tenta reconectar a cada 5 segundos de forma nao-bloqueante
+    if (agora - ultimaTentativaReconexaoMs > 5000) {
+      ultimaTentativaReconexaoMs = agora;
+      Serial.printf("[Wi-Fi STA] Tentando reconectar ao Hotspot '%s'...\n", STA_SSID);
+      WiFi.reconnect();
+    }
+  }
+
+  // 2. Notificacao de alteracao de status na Serial
+  wl_status_t statusAtual = WiFi.status();
+  if (statusAtual != ultimoStatusWifi) {
+    ultimoStatusWifi = statusAtual;
+    if (statusAtual == WL_CONNECTED) {
+      Serial.printf("\n[Wi-Fi] >>> CONECTADO COM SUCESSO! IP ATRIBUIDO: %s <<<\n", WiFi.localIP().toString().c_str());
+    } else {
+      Serial.printf("\n[Wi-Fi] Desconectado da rede (Status: %d). Mantendo tentativas em background...\n", (int)statusAtual);
+    }
+  }
+
+  // 3. Se o usuario digitar algo ou pressionar ENTER no Serial Monitor, reimprime o status completo!
+  if (Serial.available()) {
+    while (Serial.available()) Serial.read();
+    imprimirStatusRede();
+  }
+
+  // 4. Heartbeat periodico a cada 10 segundos na Serial se desconectado
+  if (WiFi.status() != WL_CONNECTED && (agora - ultimoStatusSerialMs > 10000)) {
+    ultimoStatusSerialMs = agora;
+    Serial.printf("[Wi-Fi STA] Aguardando conexao em '%s'... (AP de Contingencia: %s)\n", STA_SSID, apAtivo ? WiFi.softAPIP().toString().c_str() : "Inativo");
+  }
 }
 

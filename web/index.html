@@ -642,6 +642,39 @@
 								height="60"
 							></canvas>
 
+							<div class="input-group" style="margin-top: 10px">
+								<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px">
+									<label class="input-label" style="margin-bottom: 0">Cadência / Atenuador</label>
+									<span id="music-cadence-badge" class="badge" style="font-size: 10px; padding: 2px 6px">1 Sim, 1 Não</span>
+								</div>
+								<select
+									class="pin-select"
+									id="music-cadence-select"
+									style="width: 100%; font-size: 11px"
+								>
+									<option value="half_time" selected>Meio-Tempo (1 sim, 1 não) — Recomendado</option>
+									<option value="auto">Automático (Adaptativo pelo BPM)</option>
+									<option value="quarter_time">1 a cada 4 batidas (Super Fluido / Lento)</option>
+									<option value="all_beats">Todas as batidas (Sem atenuação)</option>
+								</select>
+							</div>
+
+							<div class="input-group" style="margin-top: 8px">
+								<div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 4px">
+									<span style="color: var(--text-muted)">Suavidade / Amplitude</span>
+									<span id="music-intensity-val" style="color: var(--accent-cyan); font-weight: 600">75%</span>
+								</div>
+								<input
+									type="range"
+									class="joint-slider"
+									id="music-intensity-slider"
+									min="30"
+									max="100"
+									value="75"
+									style="width: 100%"
+								/>
+							</div>
+
 							<div style="display: flex; gap: 8px; margin-top: 12px">
 								<button
 									class="btn btn-primary"
