@@ -19,6 +19,8 @@ class ESP32Client:
         
         self.speed = 60
         self.is_moving = False
+        self._is_sending = False
+        self._needs_send = False
         self.home_config = dict(DEFAULT_HOME_CONFIG)
         
         # Pin mapping (Servo ID -> GPIO pin)
@@ -284,23 +286,11 @@ class ESP32Client:
         )
 
         if self.is_connected:
-            try:
-                client = self._get_client()
-                # Send with both query parameters and JSON body for universal compatibility
-                payload = {k: int(v) for k, v in self.target_angles.items()}
-                payload["speed"] = self.speed
-                resp = await client.post(
-                    f"{self.base_url}/move",
-                    params=payload,
-                    json=payload,
-                    timeout=1.5
-                )
-                if resp.status_code in [200, 202]:
-                    return {"success": True, "simulated": False, "target_angles": self.target_angles}
-            except Exception as e:
-                print(f"[ESP32Client] Send move error: {e}")
-                self.is_connected = False
-                self.is_simulated = True
+            self._needs_send = True
+            if not self._is_sending:
+                self._is_sending = True
+                asyncio.create_task(self._do_send())
+            return {"success": True, "simulated": False, "target_angles": self.target_angles}
 
         return {
             "success": True,
@@ -308,6 +298,27 @@ class ESP32Client:
             "target_angles": self.target_angles,
             "current_angles": {k: int(round(v)) for k, v in self.current_angles.items()}
         }
+
+    async def _do_send(self):
+        """Dedicated background task to send the freshest angles to ESP32 without queuing old ones."""
+        while self._needs_send:
+            self._needs_send = False
+            try:
+                client = self._get_client()
+                payload = {k: int(v) for k, v in self.target_angles.items()}
+                payload["speed"] = self.speed
+                resp = await client.post(
+                    f"{self.base_url}/move",
+                    params=payload,
+                    json=payload,
+                    timeout=0.6 # Short timeout to fail fast and recover
+                )
+            except Exception as e:
+                print(f"[ESP32Client] Send move error: {e}")
+                self.is_connected = False
+                self.is_simulated = True
+                break
+        self._is_sending = False
 
     async def send_home(self) -> dict:
         """Moves arm to the configured home position."""
